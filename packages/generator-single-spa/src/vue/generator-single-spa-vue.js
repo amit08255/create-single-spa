@@ -5,31 +5,49 @@ const commandExists = util.promisify(require("command-exists"));
 const chalk = require("chalk");
 const path = require("path");
 const fs = require("fs");
-const isValidName = require("../naming");
+const validate = require("../validate-naming");
 
 module.exports = class SingleSpaVueGenerator extends Generator {
   constructor(args, opts) {
     super(args, opts);
+
+    this.option("projectName", {
+      type: String,
+    });
 
     this.option("orgName", {
       type: String,
     });
   }
   async getOptions() {
-    while (!this.options.orgName) {
-      let { orgName } = await this.prompt([
-        {
-          type: "input",
-          name: "orgName",
-          message: "Organization name (use lowercase and dashes)",
-        },
-      ]);
+    const { dir, name } = path.parse(path.resolve(this.options.dir));
+    const hasValidName = validate(name) === true;
 
-      orgName = orgName && orgName.trim();
-      if (!orgName) console.log(chalk.red("orgName must be provided!"));
-      if (!isValidName(orgName))
-        console.log(chalk.red("orgName must use lowercase and dashes!"));
-      this.options.orgName = orgName;
+    const { orgName, projectName = name } = await this.prompt([
+      {
+        type: "input",
+        name: "orgName",
+        message: "Organization name",
+        suffix: " (can use letters, numbers, dash or underscore)",
+        when: !this.options.orgName,
+        validate,
+      },
+      {
+        type: "input",
+        name: "projectName",
+        message: "Project name",
+        suffix: " (can use letters, numbers, dash or underscore)",
+        when: !hasValidName,
+        validate,
+      },
+    ]);
+
+    this.options.orgName = orgName;
+    this.options.projectName = projectName;
+    if (hasValidName) this.options.dir = dir;
+
+    if (!fs.existsSync(this.options.dir)) {
+      fs.mkdirSync(this.options.dir);
     }
   }
   async runVueCli() {
@@ -48,17 +66,14 @@ module.exports = class SingleSpaVueGenerator extends Generator {
       command += ".cmd";
     }
 
-    // Derive projectName value
-    const { dir, name } = path.parse(this.options.dir || ".");
-    if (!name) throw new Error("projectName must be provided!");
-    if (!isValidName(name))
-      throw new Error("projectName must use lowercase and dashes!");
+    const dirPath = path.resolve(this.options.dir);
+    const projectPath = path.resolve(dirPath, this.options.projectName);
 
     const { status, signal } = spawnSync(
       command,
-      args.concat(["create", name, "--skipGetStarted"]),
+      args.concat(["create", this.options.projectName, "--skipGetStarted"]),
       {
-        cwd: dir,
+        cwd: dirPath,
         stdio: "inherit",
       }
     );
@@ -69,15 +84,15 @@ module.exports = class SingleSpaVueGenerator extends Generator {
       process.exit(status);
     }
 
-    const pkgJsonPath = path.resolve(this.options.dir, "package.json");
+    const pkgJsonPath = path.resolve(projectPath, "package.json");
     const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath));
-    this.projectName = pkgJson.name = `@${this.options.orgName}/${name}`;
+    this.projectName = pkgJson.name = `@${this.options.orgName}/${this.options.projectName}`;
     fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2));
 
     // We purposely do not attempt to install in one command using presets to avoid being too restrictive with application configuration
     spawnSync(command, args.concat(["add", "single-spa"]), {
       stdio: "inherit",
-      cwd: this.options.dir,
+      cwd: projectPath,
       env: Object.assign({}, process.env, {
         VUE_CLI_SKIP_DIRTY_GIT_PROMPT: true,
       }),
@@ -85,7 +100,7 @@ module.exports = class SingleSpaVueGenerator extends Generator {
   }
   async finished() {
     const usedYarn = this.fs.exists(
-      path.resolve(this.options.dir, "yarn.lock")
+      path.resolve(this.options.dir, this.options.projectName, "yarn.lock")
     );
     console.log(
       chalk.bgWhite.black(

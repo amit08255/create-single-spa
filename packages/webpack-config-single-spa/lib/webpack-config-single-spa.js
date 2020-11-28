@@ -2,6 +2,8 @@ const path = require("path");
 const CleanWebpackPlugin = require("clean-webpack-plugin").CleanWebpackPlugin;
 const { BundleAnalyzerPlugin } = require("webpack-bundle-analyzer");
 const { UnusedFilesWebpackPlugin } = require("unused-files-webpack-plugin");
+const _HtmlWebpackPlugin = require("html-webpack-plugin");
+const StandaloneSingleSpaPlugin = require("standalone-single-spa-webpack-plugin");
 
 module.exports = webpackConfigSingleSpa;
 
@@ -20,7 +22,17 @@ function webpackConfigSingleSpa(opts) {
     );
   }
 
+  if (opts.orgPackagesAsExternal !== false) {
+    opts.orgPackagesAsExternal = true;
+  }
+
   let webpackConfigEnv = opts.webpackConfigEnv || {};
+
+  let argv = opts.argv || {};
+
+  let isProduction = argv.p || argv.mode === "production";
+
+  let HtmlWebpackPlugin = opts.HtmlWebpackPlugin || _HtmlWebpackPlugin;
 
   return {
     entry: path.resolve(
@@ -32,6 +44,7 @@ function webpackConfigSingleSpa(opts) {
       libraryTarget: "system",
       path: path.resolve(process.cwd(), "dist"),
       jsonpFunction: `webpackJsonp_${opts.projectName}`,
+      devtoolNamespace: `${opts.projectName}`,
     },
     module: {
       rules: [
@@ -67,12 +80,15 @@ function webpackConfigSingleSpa(opts) {
     devtool: "sourcemap",
     devServer: {
       compress: true,
+      historyApiFallback: true,
       headers: {
         "Access-Control-Allow-Origin": "*",
       },
       disableHostCheck: true,
     },
-    externals: ["single-spa", new RegExp(`^@${opts.orgName}/`)],
+    externals: opts.orgPackagesAsExternal
+      ? ["single-spa", new RegExp(`^@${opts.orgName}/`)]
+      : ["single-spa"],
     plugins: [
       new CleanWebpackPlugin(),
       new BundleAnalyzerPlugin({
@@ -90,7 +106,15 @@ function webpackConfigSingleSpa(opts) {
           ],
         },
       }),
-    ],
+      !isProduction && new HtmlWebpackPlugin(),
+      !isProduction &&
+        new StandaloneSingleSpaPlugin({
+          appOrParcelName: `@${opts.orgName}/${opts.projectName}`,
+          disabled: !webpackConfigEnv.standalone,
+          HtmlWebpackPlugin,
+          ...opts.standaloneOptions,
+        }),
+    ].filter(Boolean),
     resolve: {
       extensions: [".js", ".mjs", ".jsx", ".wasm", ".json"],
     },

@@ -2,7 +2,7 @@ const Generator = require("yeoman-generator");
 const ejs = require("ejs");
 const fs = require("fs").promises;
 const chalk = require("chalk");
-const isValidName = require("../naming");
+const validate = require("../validate-naming");
 
 module.exports = class SingleSpaReactGenerator extends Generator {
   constructor(args, opts) {
@@ -22,65 +22,40 @@ module.exports = class SingleSpaReactGenerator extends Generator {
     });
   }
   async getOptions() {
-    if (!this.options.packageManager) {
-      this.options.packageManager = (
-        await this.prompt([
-          {
-            type: "list",
-            name: "packageManager",
-            message: "Which package manager do you want to use?",
-            choices: ["yarn", "npm"],
-          },
-        ])
-      ).packageManager;
-    }
+    const answers = await this.prompt([
+      {
+        type: "list",
+        name: "packageManager",
+        message: "Which package manager do you want to use?",
+        choices: ["yarn", "npm"],
+        when: !this.options.packageManager,
+      },
+      {
+        type: "confirm",
+        name: "typescript",
+        message: "Will this project use Typescript?",
+        default: false,
+        when: this.options.typescript === undefined,
+      },
+      {
+        type: "input",
+        name: "orgName",
+        message: "Organization name",
+        suffix: " (can use letters, numbers, dash or underscore)",
+        when: !this.options.orgName,
+        validate,
+      },
+      {
+        type: "input",
+        name: "projectName",
+        message: "Project name",
+        suffix: " (can use letters, numbers, dash or underscore)",
+        when: !this.options.projectName,
+        validate,
+      },
+    ]);
 
-    if (this.options.typescript === undefined) {
-      this.options.typescript = (
-        await this.prompt([
-          {
-            type: "confirm",
-            name: "typescript",
-            message: "Will this project use Typescript?",
-            default: false,
-          },
-        ])
-      ).typescript;
-    }
-
-    while (!this.options.orgName) {
-      let { orgName } = await this.prompt([
-        {
-          type: "input",
-          name: "orgName",
-          message: "Organization name (use lowercase and dashes)",
-        },
-      ]);
-
-      orgName = orgName && orgName.trim();
-      if (!orgName) console.log(chalk.red("orgName must be provided!"));
-      if (!isValidName(orgName))
-        console.log(chalk.red("orgName must use lowercase and dashes!"));
-      this.options.orgName = orgName;
-    }
-
-    while (!this.options.projectName) {
-      let { projectName } = await this.prompt([
-        {
-          type: "input",
-          name: "projectName",
-          message: "Project name (use lowercase and dashes)",
-        },
-      ]);
-
-      projectName = projectName && projectName.trim();
-      if (!projectName) console.log(chalk.red("projectName must be provided!"));
-      if (!isValidName(projectName))
-        console.log(chalk.red("projectName must use lowercase and dashes!"));
-      this.options.projectName = projectName;
-    }
-
-    this.options.framework = "react";
+    Object.assign(this.options, answers, { framework: "react" });
   }
   async createPackageJson() {
     const packageJsonTemplate = await fs.readFile(
@@ -88,6 +63,7 @@ module.exports = class SingleSpaReactGenerator extends Generator {
       { encoding: "utf-8" }
     );
     const packageJsonStr = ejs.render(packageJsonTemplate, {
+      name: `@${this.options.orgName}/${this.options.projectName}`,
       packageManager: this.options.packageManager,
       typescript: this.options.typescript,
     });
@@ -110,6 +86,15 @@ module.exports = class SingleSpaReactGenerator extends Generator {
         this.destinationPath("package.json"),
         this.fs.readJSON(
           this.templatePath("../../common-templates/typescript/package.json")
+        )
+      );
+
+      this.fs.extendJSON(
+        this.destinationPath("package.json"),
+        this.fs.readJSON(
+          this.templatePath(
+            "../../common-templates/typescript/react.package.json"
+          )
         )
       );
 
